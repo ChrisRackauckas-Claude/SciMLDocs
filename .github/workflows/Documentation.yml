@@ -15,19 +15,28 @@ on:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref_name != github.event.repository.default_branch || github.ref != 'refs/tags/v*' }}
+  # The previous `|| github.ref != 'refs/tags/v*'` is always true (`v*` is a
+  # literal, not a glob), so every 6-hour schedule cancelled the in-progress
+  # main-branch build. Do not cancel default-branch or tag runs.
+  cancel-in-progress: ${{ github.ref_name != github.event.repository.default_branch && github.ref_type != 'tag' }}
 
 jobs:
   docs:
     name: "Build Documentation"
     runs-on: [self-hosted, Linux, X64, gpu, high-memory]
     timeout-minutes: 2000
+    permissions:
+      contents: write
+      statuses: write
+      actions: write
     env:
       DATADEPS_ALWAYS_ACCEPT: true
       JULIA_DEBUG: "Documenter"
       JULIA_NUM_PRECOMPILE_TASKS: 2
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - uses: julia-actions/setup-julia@v3
         with:
           version: "1.11"
@@ -41,7 +50,6 @@ jobs:
         run: julia --project=docs docs/make.jl
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          DOCUMENTER_KEY: ${{ secrets.DOCUMENTER_KEY }}
 
   aggregate:
     name: "Build and Deploy Aggregate Documentation"
@@ -49,6 +57,8 @@ jobs:
     timeout-minutes: 2000
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - uses: julia-actions/setup-julia@v3
         with:
           version: "1.11"
@@ -58,8 +68,6 @@ jobs:
           julia --version
           julia --project=docs/aggregate -e 'using Pkg; Pkg.instantiate()'
           julia --project=docs/aggregate docs/make_aggregate.jl
-        env:
-          DOCUMENTER_KEY: ${{ secrets.DOCUMENTER_KEY }}
       - name: "Prune broken symlinks"
         if: github.event_name != 'pull_request'
         # Dangling version-alias symlinks (e.g. a package's vX.Y -> missing patch dir) make
